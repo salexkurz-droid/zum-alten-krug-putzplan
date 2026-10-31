@@ -4,14 +4,14 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Zum alten Krug · Putzplan</title>
 <style>
-:root{font-family:system-ui,-apple-system,sans-serif;color:#26352c;background:#f5f5f0}*{box-sizing:border-box}body{margin:0}header{background:#203e30;color:white;padding:24px 18px}header>div,main{max-width:850px;margin:auto}h1{margin:0;font-size:1.65rem}header p{margin:8px 0 0;color:#d9e8db}main{padding:18px}section{background:white;border-radius:14px;padding:18px;margin:15px 0;box-shadow:0 2px 12px #0000000c}label{display:block;font-weight:650;margin:0 0 8px}input{width:100%;padding:12px;border:1px solid #c7d0c7;border-radius:9px;font:inherit}button{font:inherit;cursor:pointer;border:0;border-radius:9px;padding:10px 14px;background:#285e41;color:white}button:disabled{opacity:.55;cursor:not-allowed}.day{margin:20px 0}.day h2{font-size:1.1rem;margin:0 0 10px}.task{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 0;border-top:1px solid #edf0eb}.task strong{display:block}.task small{display:block;color:#617269;margin-top:4px}.done{color:#247043}.message{padding:12px;border-radius:8px;background:#fff1e5;color:#703d16}.hint{font-size:.88rem;color:#657368}.loading{color:#52665a}
+:root{font-family:system-ui,-apple-system,sans-serif;color:#26352c;background:#f5f5f0}*{box-sizing:border-box}body{margin:0}header{background:#203e30;color:white;padding:24px 18px}header>div,main{max-width:850px;margin:auto}h1{margin:0;font-size:1.65rem}header p{margin:8px 0 0;color:#d9e8db}main{padding:18px}section{background:white;border-radius:14px;padding:18px;margin:15px 0;box-shadow:0 2px 12px #0000000c}label{display:block;font-weight:650;margin:0 0 8px}input{width:100%;padding:12px;border:1px solid #c7d0c7;border-radius:9px;font:inherit}button{font:inherit;cursor:pointer;border:0;border-radius:9px;padding:10px 14px;background:#285e41;color:white}button:disabled{opacity:.55;cursor:not-allowed}.week-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}.week-nav button{white-space:nowrap}.week-nav #period{text-align:center;margin:0;flex:1}.day{margin:20px 0}.day h2{font-size:1.1rem;margin:0 0 10px}.task{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 0;border-top:1px solid #edf0eb}.task strong{display:block}.task small{display:block;color:#617269;margin-top:4px}.done{color:#247043}.message{padding:12px;border-radius:8px;background:#fff1e5;color:#703d16}.hint{font-size:.88rem;color:#657368}.loading{color:#52665a}
 </style>
 </head>
 <body>
 <header><div><h1>Zum alten Krug</h1><p>Gemeinsamer Küchenputzplan</p></div></header>
 <main>
 <section><label for="name">Dein Name</label><input id="name" maxlength="80" placeholder="Vor- und Nachname eingeben" autocomplete="name"><p class="hint">Bitte trage deinen eigenen Namen ein, bevor du eine Aufgabe abhaken möchtest.</p></section>
-<section><h2>Wochenplan</h2><p id="period" class="hint"></p><div id="status" class="loading">Aufgaben werden geladen …</div><div id="tasks"></div><button id="reload" type="button">Aktualisieren</button></section>
+<section><h2>Wochenplan</h2><div class="week-nav"><button id="previous" type="button" aria-label="Vorherige Woche">‹ Zurück</button><p id="period" class="hint"></p><button id="next" type="button" aria-label="Nächste Woche">Weiter ›</button></div><div id="status" class="loading">Aufgaben werden geladen …</div><div id="tasks"></div><button id="reload" type="button">Aktualisieren</button></section>
 </main>
 <script>
 'use strict';
@@ -34,12 +34,13 @@ async function request(path,options={}){
  return res.json();
 }
 let busy=false;
+let weekOffset=0;
 async function load(){
  $('tasks').replaceChildren();
  if(!configured()){$('status').className='message';$('status').textContent='Der öffentliche Supabase-Schlüssel muss noch in der Datei index.html eingetragen werden.';return}
  $('status').className='loading';$('status').textContent='Aufgaben werden geladen …';
  try{
- const monday=startOfWeek(), sunday=addDays(monday,6);
+ const monday=addDays(startOfWeek(),weekOffset*7), sunday=addDays(monday,6);
  $('period').textContent=`Woche vom ${nice(monday)} bis ${nice(sunday)}`;
  const [tasks,records]=await Promise.all([
  request('reinigungsaufgaben?select=id,aufgabe,wochentag,intervall_wochen,startdatum&bereich=eq.K%C3%BCche&aktiv=eq.true&order=wochentag.asc,id.asc'),
@@ -63,7 +64,7 @@ async function load(){
    const rec=recordMap.get(`${t.id}|${dueIso}`);
    const button=document.createElement('button');
    if(rec){const detail=document.createElement('small');detail.className='done';detail.textContent=`✓ Erledigt von ${rec.mitarbeiter} · ${new Intl.DateTimeFormat('de-DE',{dateStyle:'short',timeStyle:'short'}).format(new Date(rec.erledigt_am))}`;info.append(detail);button.textContent='Erledigt';button.disabled=true}
-   else{button.textContent='Abhaken';button.addEventListener('click',()=>complete(t.id,dueIso))}
+   else{button.textContent='Abhaken';const today=iso(new Date());const daysFromToday=differenceDays(parseDate(dueIso),parseDate(today));if(Math.abs(daysFromToday)>7){button.disabled=true;button.title='Abhaken nur innerhalb von 7 Tagen vor oder nach dem Fälligkeitsdatum möglich'}else{button.addEventListener('click',()=>complete(t.id,dueIso))}}
    row.append(info,button);wrap.append(row);
   }
   $('tasks').append(wrap);
@@ -83,6 +84,8 @@ async function complete(taskId,dueDate){
  finally{busy=false}
 }
 $('reload').addEventListener('click',load);
+$('previous').addEventListener('click',()=>{weekOffset--;load()});
+$('next').addEventListener('click',()=>{weekOffset++;load()});
 load();
 </script>
 </body></html>
