@@ -31,7 +31,7 @@ button{font:inherit;font-weight:650;cursor:pointer;border:0;border-radius:10px;p
 <div id="plan-view" class="hidden"><button class="back" id="back-plan" type="button">‹ Zur Startseite</button>
 <section><label for="name">Dein Name</label><input id="name" maxlength="80" placeholder="Vor- und Nachname eingeben" autocomplete="name"><p class="hint">Bitte deinen eigenen Namen eintragen, bevor du eine Aufgabe abhaken möchtest.</p></section>
 <section><h2 id="plan-title">Putzplan · Küche</h2><div class="week-nav"><button id="previous" type="button" aria-label="Vorherige Woche">‹ Zurück</button><p id="period" class="hint"></p><button id="next" type="button" aria-label="Nächste Woche">Weiter ›</button></div><div id="status" class="loading">Aufgaben werden geladen …</div><div id="tasks"></div><button id="reload" type="button">Aktualisieren</button></section></div>
-<div id="shopping-view" class="hidden"><button class="back" id="back-shopping" type="button">‹ Zur Bereichsauswahl</button><section><h2 id="shopping-title">Einkaufsliste · Küche</h2><p class="muted">Bestand prüfen und die benötigte Bestellmenge eintragen. Die Artikel sind nach Warengruppen sortiert.</p><div id="kitchen-subareas" class="hidden" style="gap:10px;flex-wrap:wrap;margin:14px 0"><button type="button" id="choose-main-kitchen">Hauptküche</button><button type="button" id="choose-breakfast">Frühstück</button></div><div id="shopping-status" class="hint"></div><p class="hint">Sollbestand und Bestand eingeben. Die Bestellmenge wird automatisch berechnet und dem Lieferanten zugeordnet.</p><label for="shopping-search">Artikel suchen</label><input id="shopping-search" type="search" placeholder="Artikel suchen …"><button id="shopping-edit-target" type="button" style="margin:12px 0">Sollbestand bearbeiten</button><p id="shopping-edit-hint" class="hint hidden">Sollbestände bearbeiten und anschließend auf „Sollbestände speichern“ klicken.</p><div id="shopping-items"></div><button id="shopping-reload" type="button">Liste aktualisieren</button></section></div>
+<div id="shopping-view" class="hidden"><button class="back" id="back-shopping" type="button">‹ Zur Bereichsauswahl</button><section><h2 id="shopping-title">Einkaufsliste · Küche</h2><p class="muted">Bestand prüfen und die benötigte Bestellmenge eintragen. Die Artikel sind nach Warengruppen sortiert.</p><div id="kitchen-subareas" class="hidden" style="gap:10px;flex-wrap:wrap;margin:14px 0"><button type="button" id="choose-main-kitchen">Hauptküche</button><button type="button" id="choose-breakfast">Frühstück</button></div><div id="shopping-status" class="hint"></div><p class="hint">Sollbestand und Bestand eingeben. Die Bestellmenge wird automatisch berechnet und dem Lieferanten zugeordnet.</p><label for="shopping-search">Artikel suchen</label><input id="shopping-search" type="search" placeholder="Artikel suchen …"><button id="shopping-edit-target" type="button" style="margin:12px 0">Sollbestand bearbeiten</button><p id="shopping-edit-hint" class="hint hidden">Sollbestände bearbeiten und anschließend auf „Sollbestände speichern“ klicken.</p><div id="shopping-items"></div><div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:18px"><button id="shopping-reload" type="button">Liste aktualisieren</button><button id="shopping-reset-stock" type="button" style="background:#8b4b35">Istbestand zurücksetzen</button></div><p class="hint">Beim Zurücksetzen wird nur der Istbestand der aktuell ausgewählten Einkaufsliste auf 0 gesetzt. Alle Sollbestände bleiben erhalten.</p></section></div>
 <div id="supplier-index" class="hidden"><button class="back" id="back-supplier-index" type="button">‹ Zur Startseite</button><section><h2>Bestellungen nach Lieferanten</h2><p class="muted">Automatisch aus den Soll- und Istbeständen berechnet.</p><div id="supplier-buttons" class="home-grid"></div></section></div>
 <div id="supplier-view" class="hidden"><button class="back" id="back-supplier" type="button">‹ Zur Startseite</button> <button class="back" id="supplier-all" type="button">Alle Lieferanten</button><section><h2 id="supplier-title"></h2><p id="supplier-status" class="hint"></p><div id="supplier-items"></div><button id="supplier-copy" type="button">Bestellung kopieren</button> <button id="supplier-done" type="button">✓ Bestellung erledigt</button> <button id="supplier-undo" type="button" class="back hidden">Rückgängig</button></section></div>
 </main><script>
@@ -241,6 +241,27 @@ $('shopping-edit-target').addEventListener('click',async()=>{
 });
 $('shopping-search').addEventListener('input',renderShopping);
 $('shopping-reload').addEventListener('click',loadShopping);
+$('shopping-reset-stock').addEventListener('click',async()=>{
+ if(!shoppingEnabled){alert('Die Bestände sind noch nicht geladen.');return;}
+ if(targetEditMode){alert('Bitte zuerst die Sollbestände speichern oder den Bearbeitungsmodus verlassen.');return;}
+ const relevant=SHOPPING_CATALOG.filter(x=>x.bereich===currentArea&&(currentArea!=='Küche'||x.teilbereich===kitchenSubarea||x.teilbereich==='Beide'));
+ const keys=new Set(relevant.map(x=>x.key));
+ const rows=[...shoppingData.entries()].filter(([key,row])=>keys.has(key)&&num(row.bestand)>0);
+ if(!rows.length){alert('In dieser Einkaufsliste gibt es keinen Istbestand zum Zurücksetzen.');return;}
+ const label=currentArea==='Küche'?`Küche · ${kitchenSubarea}`:currentArea;
+ if(!confirm(`Wirklich den Istbestand für ${label} bei ${rows.length} Artikeln auf 0 setzen?\n\nAlle Sollbestände bleiben gespeichert. Diese Aktion kann nicht automatisch rückgängig gemacht werden.`))return;
+ const btn=$('shopping-reset-stock');btn.disabled=true;$('shopping-status').textContent='Istbestände werden zurückgesetzt …';
+ let count=0;
+ try{
+  for(const [key,row] of rows){
+   await teamRequest('krug_bestand?artikel_id=eq.'+encodeURIComponent(key),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({bestand:0})});
+   shoppingData.set(key,{...row,bestand:0});count++;
+  }
+  renderShopping();$('shopping-status').textContent=`✓ ${count} Istbestände zurückgesetzt. Sollbestände unverändert.`;
+ }catch(e){$('shopping-status').textContent=`Zurücksetzen unterbrochen (${count} von ${rows.length} Artikeln). Bitte die Liste neu laden.`;alert('Nicht alle Istbestände konnten zurückgesetzt werden: '+(e.message||e));}
+ finally{btn.disabled=false;}
+});
+
 function supplierSnapshot(item,row){return `${num(row.bestand)}|${num(row.sollbestand)}|${item.lieferant}`}
 function showOnly(id){if(id!=='team-login'&&!teamSession?.refresh_token){teamPending=()=>showOnly(id);id='team-login'}for(const el of ['home','area-view','plan-view','shopping-view','temperature-view','supplier-index','supplier-view','team-login'])$(el).classList.toggle('hidden',el!==id);$('global-home-nav').style.display=(id==='home'||id==='team-login')?'none':'block'}
 function openSuppliers(){showOnly('supplier-index');const root=$('supplier-buttons');root.replaceChildren();for(const name of SUPPLIERS){const b=document.createElement('button');b.className='home-tile';b.textContent=name;b.addEventListener('click',()=>teamGate(()=>openSupplier(name)));root.append(b)}}
