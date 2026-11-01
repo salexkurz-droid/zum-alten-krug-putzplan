@@ -27,7 +27,7 @@ button{font:inherit;font-weight:650;cursor:pointer;border:0;border-radius:10px;p
 <div id="temp-fields"></div><button type="button" id="temp-save">Temperaturen speichern</button><p id="temp-feedback" role="status" class="hint"></p></section>
 <section><h2>Bisherige Kontrollen (Vorschau)</h2><p class="hint">Diese Übersicht zeigt nur Einträge, die in diesem Browser gespeichert wurden.</p><div id="temp-history"></div></section></div>
 <div id="area-view" class="hidden"><button class="back" id="back-area" type="button">‹ Zur Startseite</button><section><h2 id="area-title">Bereich auswählen</h2><p class="muted">Für welchen Bereich möchtest du die Liste öffnen?</p><div class="home-grid"><button class="home-tile" data-area-choice="Küche" type="button"><span style="font-size:2.3rem">🍳</span><span>Küche</span></button><button class="home-tile" data-area-choice="Service" type="button"><span style="font-size:2.3rem">☕</span><span>Service</span></button><button class="home-tile" data-area-choice="Verbrauchsmaterial & Hygiene" type="button"><span style="font-size:2.3rem">🧻</span><span>Verbrauchsmaterial & Hygiene</span></button></div></section></div>
-<div id="team-login" class="hidden"><section><h2>Team-Zugang</h2><p>Einmal pro Handy mit dem gemeinsamen Team-Zugang anmelden. Danach bleibt die Anmeldung gespeichert.</p><label for="team-email">Team-E-Mail</label><input id="team-email" type="email" autocomplete="username" placeholder="Team-E-Mail-Adresse"><label for="team-pin" style="margin-top:12px">Team-PIN (mindestens 6 Ziffern)</label><input id="team-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Team-PIN"><button id="team-login-submit" type="button" style="margin-top:14px">Anmelden</button> <button id="team-login-back" class="back" type="button">‹ Zum Hauptmenü</button><p id="team-login-status" class="message hidden"></p></section></div>
+<div id="team-login" class="hidden"><section><h2>Team-Zugang</h2><p>Einmal pro Handy mit dem gemeinsamen Team-Zugang anmelden. Danach bleibt die Anmeldung gespeichert.</p><label for="team-email">Team-E-Mail</label><input id="team-email" type="email" autocomplete="username" placeholder="Team-E-Mail-Adresse"><label for="team-pin" style="margin-top:12px">Team-Passwort</label><input id="team-pin" type="password" autocomplete="current-password" placeholder="Team-Passwort"><button id="team-login-submit" type="button" style="margin-top:14px">Anmelden</button> <button id="team-login-back" class="back" type="button">‹ Zum Hauptmenü</button><p id="team-login-status" class="message hidden"></p></section></div>
 <div id="plan-view" class="hidden"><button class="back" id="back-plan" type="button">‹ Zur Startseite</button>
 <section><label for="name">Dein Name</label><input id="name" maxlength="80" placeholder="Vor- und Nachname eingeben" autocomplete="name"><p class="hint">Bitte deinen eigenen Namen eintragen, bevor du eine Aufgabe abhaken möchtest.</p></section>
 <section><h2 id="plan-title">Putzplan · Küche</h2><div class="week-nav"><button id="previous" type="button" aria-label="Vorherige Woche">‹ Zurück</button><p id="period" class="hint"></p><button id="next" type="button" aria-label="Nächste Woche">Weiter ›</button></div><div id="status" class="loading">Aufgaben werden geladen …</div><div id="tasks"></div><button id="reload" type="button">Aktualisieren</button></section></div>
@@ -54,7 +54,7 @@ try{teamSession=JSON.parse(localStorage.getItem(TEAM_SESSION_KEY)||'null')}catch
 function teamValid(){return !!teamSession?.access_token&&Date.now()<(teamSession.expires_at||0)*1000-60000}
 async function teamRefresh(){
  if(teamValid())return;
- if(!teamSession?.refresh_token)throw new Error('Bitte mit dem Team-PIN anmelden.');
+ if(!teamSession?.refresh_token)throw new Error('Bitte mit dem Team-Passwort anmelden.');
  const r=await fetch(`${PROJECT_URL}/auth/v1/token?grant_type=refresh_token`,{method:'POST',headers:{'apikey':PUBLISHABLE_KEY,'Content-Type':'application/json'},body:JSON.stringify({refresh_token:teamSession.refresh_token})});
  if(!r.ok){teamSession=null;localStorage.removeItem(TEAM_SESSION_KEY);throw new Error('Team-Anmeldung abgelaufen. Bitte erneut anmelden.');}
  const v=await r.json();teamSession={...v,expires_at:Math.floor(Date.now()/1000)+v.expires_in};localStorage.setItem(TEAM_SESSION_KEY,JSON.stringify(teamSession));
@@ -68,7 +68,8 @@ async function teamRequest(path,options={}){
  return request(path,{...options,headers:{...(options.headers||{}),Authorization:`Bearer ${teamSession.access_token}`}});
 }
 async function request(path,options={}){
- const res=await fetch(`${PROJECT_URL}/rest/v1/${path}`,{...options,headers:{'apikey':PUBLISHABLE_KEY,'Authorization':`Bearer ${PUBLISHABLE_KEY}`,'Content-Type':'application/json',...(options.headers||{})}});
+ await teamRefresh();
+ const res=await fetch(`${PROJECT_URL}/rest/v1/${path}`,{...options,headers:{'apikey':PUBLISHABLE_KEY,'Authorization':`Bearer ${teamSession.access_token}`,'Content-Type':'application/json',...(options.headers||{})}});
  if(!res.ok){let details='';try{details=(await res.json()).message||''}catch{}throw new Error(details||`HTTP ${res.status}`)}
  if(res.status===204)return null;
  return res.json();
@@ -138,6 +139,7 @@ async function complete(taskId,dueDate){
  finally{busy=false}
 }
 function showView(view,area='Küche'){
+ if(!teamSession?.refresh_token){teamPending=()=>showView(view,area);showOnly('team-login');return}
  $('global-home-nav').style.display=view==='home'?'none':'block';
  $('supplier-index').classList.add('hidden');$('supplier-view').classList.add('hidden');$('team-login').classList.add('hidden');
  currentArea=area;
@@ -218,7 +220,7 @@ $('shopping-search').addEventListener('input',renderShopping);
 $('shopping-reload').addEventListener('click',loadShopping);
 $('shopping-reset').addEventListener('click',async()=>{if(!shoppingEnabled||!confirm(`Nur die Bestände von „${currentArea}“ zurücksetzen? Artikel und Sollbestände bleiben erhalten.`))return;try{await teamRequest(`krug_bestand?artikel_id=in.(${SHOPPING_CATALOG.filter(x=>x.bereich===currentArea).map(x=>encodeURIComponent(x.key)).join(',')})`,{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({bestand:0})});await loadShopping()}catch(e){alert('Zurücksetzen fehlgeschlagen.')}});
 function supplierSnapshot(item,row){return `${num(row.bestand)}|${num(row.sollbestand)}|${item.lieferant}`}
-function showOnly(id){for(const el of ['home','area-view','plan-view','shopping-view','temperature-view','supplier-index','supplier-view','team-login'])$(el).classList.toggle('hidden',el!==id);$('global-home-nav').style.display=id==='home'?'none':'block'}
+function showOnly(id){if(id!=='team-login'&&!teamSession?.refresh_token){teamPending=()=>showOnly(id);id='team-login'}for(const el of ['home','area-view','plan-view','shopping-view','temperature-view','supplier-index','supplier-view','team-login'])$(el).classList.toggle('hidden',el!==id);$('global-home-nav').style.display=(id==='home'||id==='team-login')?'none':'block'}
 function openSuppliers(){showOnly('supplier-index');const root=$('supplier-buttons');root.replaceChildren();for(const name of SUPPLIERS){const b=document.createElement('button');b.className='home-tile';b.textContent=name;b.addEventListener('click',()=>teamGate(()=>openSupplier(name)));root.append(b)}}
 async function openSupplier(name){supplierName=name;showOnly('supplier-view');$('supplier-title').textContent='Bestellliste · '+name;$('supplier-status').textContent='Bestellungen werden geladen …';$('supplier-items').replaceChildren();$('supplier-done').disabled=true;
  try{const [stocks,orders]=await Promise.all([teamRequest('krug_bestand?select=artikel_id,bestand,sollbestand'),teamRequest(`krug_bestellungen?select=id,lieferant,artikel_id,menge,status,erstellt_am,erledigt_am&lieferant=eq.${encodeURIComponent(name)}&order=erstellt_am.desc&limit=500`)]);supplierRows=stocks;supplierOrders=orders;renderSupplier()}
@@ -238,8 +240,8 @@ $('open-suppliers').addEventListener('click',openSuppliers);
 $('back-supplier-index').addEventListener('click',()=>showOnly('home'));
 $('back-supplier').addEventListener('click',()=>showOnly('home'));
 $('supplier-all').addEventListener('click',openSuppliers);
-$('team-login-back').addEventListener('click',()=>{teamPending=null;showView('home')});
-$('team-login-submit').addEventListener('click',async()=>{const email=$('team-email').value.trim(),password=$('team-pin').value;const status=$('team-login-status');status.classList.remove('hidden');status.textContent='Anmeldung läuft …';try{const r=await fetch(`${PROJECT_URL}/auth/v1/token?grant_type=password`,{method:'POST',headers:{'apikey':PUBLISHABLE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});if(!r.ok)throw new Error('E-Mail oder Team-PIN stimmt nicht.');const v=await r.json();teamSession={...v,expires_at:Math.floor(Date.now()/1000)+v.expires_in};localStorage.setItem(TEAM_SESSION_KEY,JSON.stringify(teamSession));$('team-pin').value='';status.classList.add('hidden');const action=teamPending;teamPending=null;(action||(()=>showView('home')))()}catch(e){status.textContent=e.message}});
+$('team-login-back').addEventListener('click',()=>{teamPending=null;showOnly('team-login')});
+$('team-login-submit').addEventListener('click',async()=>{const email=$('team-email').value.trim(),password=$('team-pin').value;const status=$('team-login-status');status.classList.remove('hidden');status.textContent='Anmeldung läuft …';try{const r=await fetch(`${PROJECT_URL}/auth/v1/token?grant_type=password`,{method:'POST',headers:{'apikey':PUBLISHABLE_KEY,'Content-Type':'application/json'},body:JSON.stringify({email,password})});if(!r.ok)throw new Error('E-Mail oder Team-Passwort stimmt nicht.');const v=await r.json();teamSession={...v,expires_at:Math.floor(Date.now()/1000)+v.expires_in};localStorage.setItem(TEAM_SESSION_KEY,JSON.stringify(teamSession));$('team-pin').value='';status.classList.add('hidden');const action=teamPending;teamPending=null;(action||(()=>showView('home')))()}catch(e){status.textContent=e.message}});
 // Temperaturkontrollen zentral in Supabase, sieben Geräte pro Datum.
 const TEMP_DEVICES=['Spülküche – Kühlschrank 1','Spülküche – Kühlschrank 2','Spülküche – Kühlschrank 3','Schnitzelposten','Hauptposten','Saladette','Frühstückskühlschrank'];
 let tempEntries=[];
@@ -294,5 +296,16 @@ function initTemp(){
  updateTempDate();
 }
 initTemp();
+// Abmelden entfernt die lokale Sitzung, ohne die Daten zu löschen.
+const logoutButton=document.createElement('button');logoutButton.textContent='Abmelden';logoutButton.className='back';logoutButton.style.marginTop='12px';
+logoutButton.addEventListener('click',async()=>{const token=teamSession?.access_token;teamSession=null;teamPending=null;localStorage.removeItem(TEAM_SESSION_KEY);showOnly('team-login');if(token)try{await fetch(`${PROJECT_URL}/auth/v1/logout`,{method:'POST',headers:{apikey:PUBLISHABLE_KEY,Authorization:`Bearer ${token}`}})}catch{}});
+$('home').append(logoutButton);
+// Erst nach einer gültigen Supabase-Anmeldung darf die App geöffnet werden.
+(async function startProtectedApp(){
+ showOnly('team-login');
+ if(!teamSession?.refresh_token)return;
+ try{await teamRefresh();showOnly('home')}
+ catch(e){teamSession=null;localStorage.removeItem(TEAM_SESSION_KEY);showOnly('team-login')}
+})();
 
 </script></body></html>
