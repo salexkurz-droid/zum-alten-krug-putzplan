@@ -211,7 +211,15 @@ function renderShopping(){
    for(const name of SUPPLIERS){const opt=document.createElement('option');opt.textContent=name;opt.value=name;supplier.append(opt)}supplier.value=item.lieferant;
    const feedback=document.createElement('small');feedback.className='save-status';
    const refresh=()=>{info.textContent=`Zu bestellen: ${orderText(item,{bestand:stock.value,sollbestand:target.value})}`};refresh();row.append(fields,info,supplier,feedback);
-   const save=async()=>{feedback.textContent='Speichern …';const data={artikel_id:item.key,bestand:num(stock.value),sollbestand:num(shoppingData.get(item.key)?.sollbestand)};try{await teamRequest('krug_bestand?on_conflict=artikel_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(data)});shoppingData.set(item.key,data);feedback.textContent='✓ Gespeichert'}catch(e){feedback.textContent='Speichern fehlgeschlagen';feedback.classList.add('shopping-status-error')}};
+   const save=async()=>{feedback.textContent='Speichern …';const value=num(stock.value);try{
+     // Istbestand unabhängig vom Sollbestand speichern: keine alten Sollwerte überschreiben.
+     if(shoppingData.has(item.key)){
+      await teamRequest('krug_bestand?artikel_id=eq.'+encodeURIComponent(item.key),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({bestand:value})});
+     }else{
+      await teamRequest('krug_bestand?on_conflict=artikel_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({artikel_id:item.key,bestand:value,sollbestand:0})});
+     }
+     shoppingData.set(item.key,{...(shoppingData.get(item.key)||{}),artikel_id:item.key,bestand:value});feedback.textContent='✓ Gespeichert';feedback.classList.remove('shopping-status-error')
+    }catch(e){feedback.textContent='Speichern fehlgeschlagen: '+e.message;feedback.classList.add('shopping-status-error')}};
    const schedule=()=>{refresh();clearTimeout(shoppingTimers.get(item.key));shoppingTimers.set(item.key,setTimeout(save,650))};stock.addEventListener('input',schedule);target.addEventListener('input',()=>{targetDraft.set(item.key,num(target.value));refresh();feedback.textContent='Noch nicht gespeichert'});supplier.addEventListener('change',schedule);section.append(row);
   }root.append(section);
  }
@@ -226,17 +234,20 @@ $('shopping-edit-target').addEventListener('click',async()=>{
  if(!targetEditMode){targetEditMode=true;updateTargetEditButton();renderShopping();return}
  const button=$('shopping-edit-target');button.disabled=true;
  try{
-  // Wait for pending stock saves before updating target values.
-  await new Promise(resolve=>setTimeout(resolve,750));
+  // Ausstehende Istbestand-Speicherungen abschließen, bevor Sollwerte geschrieben werden.
+  await new Promise(resolve=>setTimeout(resolve,800));
   for(const [key,value] of targetDraft){
-   const current=shoppingData.get(key)||{};
-   const data={artikel_id:key,bestand:num(current.bestand),sollbestand:num(value)};
-   await teamRequest('krug_bestand?on_conflict=artikel_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(data)});
-   shoppingData.set(key,data);
+   const targetValue=num(value);
+   if(shoppingData.has(key)){
+    await teamRequest('krug_bestand?artikel_id=eq.'+encodeURIComponent(key),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({sollbestand:targetValue})});
+   }else{
+    await teamRequest('krug_bestand?on_conflict=artikel_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({artikel_id:key,bestand:0,sollbestand:targetValue})});
+   }
+   shoppingData.set(key,{...(shoppingData.get(key)||{}),artikel_id:key,sollbestand:targetValue});
   }
   targetDraft.clear();targetEditMode=false;updateTargetEditButton();renderShopping();
   $('shopping-status').textContent='✓ Sollbestände dauerhaft gespeichert.';
- }catch(e){alert('Sollbestände konnten nicht vollständig gespeichert werden. Bitte erneut versuchen.');}
+ }catch(e){$('shopping-status').textContent='Sollbestände konnten nicht gespeichert werden: '+e.message;alert('Sollbestände konnten nicht vollständig gespeichert werden: '+e.message);}
  finally{button.disabled=false}
 });
 $('shopping-search').addEventListener('input',renderShopping);
