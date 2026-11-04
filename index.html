@@ -271,7 +271,7 @@ function renderShopping(){
    const saved=shoppingData.get(item.key)||{},row=document.createElement('div');row.className='shopping-row';const title=document.createElement('strong');title.textContent=item.artikel;row.append(title);
    const fields=document.createElement('div');fields.className='shopping-fields';
    const field=(label,val)=>{const wrap=document.createElement('label');wrap.textContent=label;const el=document.createElement('input');el.type='number';el.min='0';el.step='any';el.inputMode='decimal';el.value=val??'';el.disabled=!shoppingEnabled;wrap.append(el);fields.append(wrap);return el};
-   const stock=field(`Bestand (${item.einheit})`,saved.bestand),target=field(`Sollbestand (${item.einheit})`,targetDraft.has(item.key)?targetDraft.get(item.key):saved.sollbestand??0);stock.placeholder='Nicht kontrolliert';target.disabled=!shoppingEnabled||!targetEditMode;
+   const stock=field(`Bestand (${item.einheit})`,saved.bestand),target=field(`Sollbestand (${item.einheit})`,targetDraft.has(item.key)?targetDraft.get(item.key):saved.sollbestand??0);stock.placeholder='– (nicht kontrolliert)';target.disabled=!shoppingEnabled||!targetEditMode;
    const info=document.createElement('div');info.className='hint';const supplier=document.createElement('select');supplier.setAttribute('aria-label','Lieferant für '+item.artikel);supplier.style.cssText='width:100%;margin:8px 0;padding:9px';supplier.disabled=true;
    for(const name of SUPPLIERS){const opt=document.createElement('option');opt.textContent=name;opt.value=name;supplier.append(opt)}supplier.value=item.lieferant;
    const feedback=document.createElement('small');feedback.className='save-status';
@@ -306,7 +306,7 @@ $('shopping-edit-target').addEventListener('click',async()=>{
    if(shoppingData.has(key)){
     await teamRequest('krug_bestand?artikel_id=eq.'+encodeURIComponent(key),{method:'PATCH',headers:{Prefer:'return=minimal'},body:JSON.stringify({sollbestand:targetValue})});
    }else{
-    await teamRequest('krug_bestand?on_conflict=artikel_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({artikel_id:key,bestand:0,sollbestand:targetValue})});
+    await teamRequest('krug_bestand?on_conflict=artikel_id',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({artikel_id:key,bestand:null,sollbestand:targetValue})});
    }
    shoppingData.set(key,{...(shoppingData.get(key)||{}),artikel_id:key,sollbestand:targetValue});
   }
