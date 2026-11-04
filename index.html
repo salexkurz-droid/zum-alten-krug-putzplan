@@ -21,11 +21,11 @@ button{font:inherit;font-weight:650;cursor:pointer;border:0;border-radius:10px;p
 <button class="home-tile temperature-tile" id="open-temperature" type="button"><svg viewBox="0 0 48 48" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 27V9a5 5 0 0 1 10 0v18a10 10 0 1 1-10 0Z"/><path d="M24 17v18"/><circle cx="24" cy="35" r="4" fill="currentColor" stroke="none"/><path d="M34 12h5M34 19h5"/></svg><span>Temperaturliste</span></button>
 <button class="home-tile temperature-tile" id="open-suppliers" type="button"><span data-emoji>🚚</span><span>Lieferantenbestellungen</span></button></div></section>
 <div id="temperature-view" class="hidden"><button class="back" id="back-temperature" type="button">‹ Zur Startseite</button>
-<section><h2>Temperaturliste · Küche</h2><p class="muted">Tägliche Temperaturkontrolle · Dienstag bis Sonntag · 1× täglich</p><div class="temp-notice" id="temp-notice">Vorschau: Eingaben werden nur auf diesem Gerät gespeichert, noch nicht gemeinsam in Supabase.</div>
+<section><h2>Temperaturliste · Küche</h2><p class="muted">Tägliche Temperaturkontrolle · Dienstag bis Sonntag · 1× täglich</p><div class="temp-notice" id="temp-notice">Die Temperaturkontrollen werden gemeinsam in Supabase gespeichert. Der Speicherstatus wird nach jeder Eingabe überprüft.</div>
 <label for="temp-name">Name der kontrollierenden Person</label><input id="temp-name" maxlength="80" placeholder="Vor- und Nachname" autocomplete="name">
 <label for="temp-date" style="margin-top:15px">Datum der Kontrolle</label><input id="temp-date" type="date"><p id="temp-day-info" class="hint"></p>
 <div id="temp-fields"></div><button type="button" id="temp-save">Temperaturen speichern</button><p id="temp-feedback" role="status" class="hint"></p></section>
-<section><h2>Bisherige Kontrollen (Vorschau)</h2><p class="hint">Diese Übersicht zeigt nur Einträge, die in diesem Browser gespeichert wurden.</p><div id="temp-history"></div></section></div>
+<section><h2>Bisherige Kontrollen</h2><p class="hint">Gemeinsame Einträge aus Supabase, auch auf anderen Geräten sichtbar.</p><div id="temp-history"></div></section></div>
 <div id="area-view" class="hidden"><button class="back" id="back-area" type="button">‹ Zur Startseite</button><section><h2 id="area-title">Bereich auswählen</h2><p class="muted">Für welchen Bereich möchtest du die Liste öffnen?</p><div class="home-grid"><button class="home-tile" data-area-choice="Küche" type="button"><span style="font-size:2.3rem">🍳</span><span>Küche</span></button><button class="home-tile" data-area-choice="Service" type="button"><span style="font-size:2.3rem">☕</span><span>Service</span></button><button class="home-tile" data-area-choice="Verbrauchsmaterial & Hygiene" type="button"><span style="font-size:2.3rem">🧻</span><span>Verbrauchsmaterial & Hygiene</span></button></div></section></div>
 <div id="team-login" class="hidden"><section><h2>Team-Zugang</h2><p>Einmal pro Handy mit dem gemeinsamen Team-Zugang anmelden. Danach bleibt die Anmeldung gespeichert.</p><label for="team-email">Team-E-Mail</label><input id="team-email" type="email" autocomplete="username" placeholder="Team-E-Mail-Adresse"><label for="team-pin" style="margin-top:12px">Team-Passwort</label><input id="team-pin" type="password" autocomplete="current-password" placeholder="Team-Passwort"><button id="team-login-submit" type="button" style="margin-top:14px">Anmelden</button> <button id="team-login-back" class="back" type="button">‹ Zum Hauptmenü</button><p id="team-login-status" class="message hidden"></p></section></div>
 <div id="plan-view" class="hidden"><button class="back" id="back-plan" type="button">‹ Zur Startseite</button>
@@ -368,7 +368,7 @@ async function loadTemperatures(){
   const rows=await teamRequest('krug_temperaturen?select=id,geraet,temperatur,mitarbeiter,gemessen_am,kontrolldatum&order=kontrolldatum.desc,gemessen_am.desc&limit=300');
   const byDate=new Map();for(const r of rows){if(!byDate.has(r.kontrolldatum))byDate.set(r.kontrolldatum,{date:r.kontrolldatum,name:r.mitarbeiter,values:Array(7).fill('')});const index=TEMP_DEVICES.indexOf(r.geraet);if(index>=0)byDate.get(r.kontrolldatum).values[index]=String(r.temperatur)}
   tempEntries=[...byDate.values()];renderTempHistory();updateTempDate();
- }catch(e){$('temp-feedback').textContent='Temperaturdaten konnten nicht geladen werden: '+e.message}
+ }catch(e){$('temp-feedback').textContent='Temperaturdaten konnten nicht geladen werden: '+e.message;throw e}
 }
 function updateTempDate(){
  const date=$('temp-date').value;const parsed=date?parseDate(date):null;
@@ -406,9 +406,12 @@ function initTemp(){
    // UPSERT per unique (kontrolldatum,geraet) statt löschen, damit keine Lücke entsteht.
    const data=TEMP_DEVICES.map((geraet,i)=>({kontrolldatum:date,geraet,temperatur:Number(values[i]),mitarbeiter:name,gemessen_am:new Date().toISOString()}));
    await teamRequest('krug_temperaturen?on_conflict=kontrolldatum,geraet',{method:'POST',headers:{Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(data)});
-   await loadTemperatures();$('temp-feedback').textContent='✓ In Supabase gespeichert – auf allen Handys sichtbar.';
-  }catch(e){$('temp-feedback').textContent='Speichern fehlgeschlagen: '+e.message}
-  finally{$('temp-save').disabled=false}
+   await loadTemperatures();
+   const saved=tempEntries.find(x=>x.date===date);
+   if(!saved||saved.values.some((v,i)=>Number(v)!==Number(values[i])))throw new Error('Die gespeicherten Temperaturen konnten nicht vollständig aus Supabase bestätigt werden. Bitte prüfen.');
+   $('temp-feedback').textContent='✓ In Supabase gespeichert und erfolgreich wieder geladen – auf allen Geräten verfügbar.';
+  }catch(e){$('temp-feedback').textContent='Speichern oder Prüfen fehlgeschlagen: '+e.message}
+  finally{$('temp-save').disabled=(!$('temp-date').value||parseDate($('temp-date').value).getDay()===1||$('temp-date').value>tempToday())}
  });
  updateTempDate();
 }
